@@ -161,14 +161,18 @@ def text_to_df(output):
     return df
 
 
-def clean_sql(sql):
-    lines = sql.strip().splitlines()
-    cleaned_lines = []
-    for line in lines:
-        stripped = line.strip()  # Remove leading/trailing spaces and tabs
-        if stripped:             # Skip empty lines
-            cleaned_lines.append(stripped)
-    return "\n".join(cleaned_lines)
+def clean_sql(sql_query):
+    sql_query = re.sub(r' +', ' ', sql_query)
+    sql_query = re.sub(r'\n\s*\n', '\n', sql_query)
+    sql_query = re.sub(r'\n+', '\n', sql_query)
+    sql_query = re.sub(r'^ +', '', sql_query, flags=re.MULTILINE)
+    sql_query = sql_query.replace('\t', '')
+    sql_query = sql_query.replace('\r', '')
+    sql_query = sql_query.replace('\f', '')
+    sql_query = sql_query.replace('\v', '')
+    sql_query = re.sub(r'[^\S\n]*,[^\S\n]*', ',', sql_query)
+    sql_query = re.sub(r'\s*;\s*$', '', sql_query)
+    return sql_query
 
 
 from tkinter.filedialog import asksaveasfilename
