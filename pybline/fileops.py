@@ -94,7 +94,10 @@ def upload_file(remote_path=None):
     finally:
         if os.path.exists(script_path):
             os.remove(script_path)
-    alert()
+    try:
+        alert()
+    except Exception:
+        pass
 
 #--------------------------------------------------------------------------------------------------------------------------------
 
@@ -171,8 +174,10 @@ def download_file(remote_file_path):
     finally:
         if os.path.exists(script_path):
             os.remove(script_path)
-
-    alert()
+    try:
+        alert()
+    except Exception:
+        pass
 
 #--------------------------------------------------------------------------------------------------------------------------------
 
