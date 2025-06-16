@@ -15,20 +15,24 @@ from pathlib import Path
 import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 import pygame # type: ignore
-pygame.mixer.init()
-time.sleep(0.2)
 def alert(index=0):
     """
     Play a system beep sound as a simple alert.
     Useful for notifying users after long-running operations.
+    Falls back silently if audio is unavailable.
     """
     try:
-        base = Path(__file__).parent/ "sounds"
+        pygame.mixer.init()
+        time.sleep(0.2)  # Give it a moment to initialize
+        base = Path(__file__).parent / "sounds"
         sound_files = sorted(base.glob("*.wav"))
+        if not sound_files:
+            print(" ^}^l No sound files found.")
+            return
         sound = pygame.mixer.Sound(str(sound_files[index]))
         sound.play()
     except Exception as e:
-        print("❌ Failed to play sound:", e)
+        print(" ^}^l Failed to play sound:", e)
 
 
 def to_sql_inlist(series):
