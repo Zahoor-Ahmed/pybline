@@ -27,12 +27,13 @@ def alert(index=0):
         base = Path(__file__).parent / "sounds"
         sound_files = sorted(base.glob("*.wav"))
         if not sound_files:
-            print(" ^}^l No sound files found.")
+            print("No sound files found.")
             return
         sound = pygame.mixer.Sound(str(sound_files[index]))
         sound.play()
     except Exception as e:
-        print(" ^}^l Failed to play sound:", e)
+        pass
+        # print("Failed to play sound:", e)
 
 
 def to_sql_inlist(series):
