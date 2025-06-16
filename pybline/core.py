@@ -98,13 +98,19 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
     while True:
         if timeout > 0 and time.time() - start_time > timeout:
             print("Timeout reached, exiting loop.")
-            alert()
+            try:
+                alert()
+            except Exception:
+                pass
             break
         if shell.recv_ready():
             new_data = shell.recv(65535).decode('utf-8')
             output += new_data
             if any(x in new_data for x in ["rows selected", "No rows selected", "row selected", "Error"]):
-                alert()
+                try:
+                    alert()
+                except Exception:
+                    pass
                 break
         else:
             time.sleep(0.001)
