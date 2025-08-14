@@ -40,7 +40,7 @@ def ssh_connection():
     try:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(server_ip, port, username, password)
+        client.connect(server_ip, port, username, password, look_for_keys=False, allow_agent=False)
         client.get_transport().set_keepalive(900)
 
         shell = client.invoke_shell()
