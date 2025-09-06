@@ -66,6 +66,7 @@ def extract_query_output(output, sql_query=None):
             if re.match(r"^\d+\srows selected|No rows selected|1 row selected", lines[i].strip()):
                 rows_line = lines[i].strip()
                 break
+        table_output = clean_out(table_output)
         return table_output.strip(), rows_line
 
     # Step 3: Extract error message cleanly starting from "Error:" and stopping before "== Carbon Parser:"
@@ -144,7 +145,7 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
         """
 
     if io:
-        print(clean_out(query_output))
+        print(query_output)
         if rows:
             print(rows)
 
