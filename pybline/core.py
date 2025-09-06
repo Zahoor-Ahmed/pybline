@@ -5,7 +5,7 @@ import datetime
 from pathlib import Path
 
 from .ssh import ssh_connection
-from .utils import clean_sql, alert
+from .utils import clean_sql, alert, clean_out
 from .config import BEELINE_CONFIG
 
 def beeline_session(shell, queue_name=None, timeout=10):
@@ -144,7 +144,7 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
         """
 
     if io:
-        print(query_output)
+        print(clean_out(query_output))
         if rows:
             print(rows)
 

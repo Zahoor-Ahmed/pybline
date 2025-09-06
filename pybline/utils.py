@@ -319,4 +319,122 @@ def set_env(interactive=True):
 
 
 
+from typing import Any
+from datetime import datetime
+
+_all_ = ['convert_month','convert_day','clean_output']
+
+def convert_month(value, offset=0):
+    """
+    Convert between this_month (months since Jan 1970) and YYYYMM.
+    Optional offset (months) can be added or subtracted.
+    """
+    if isinstance(value, str) and len(value) == 6:
+        year = int(value[:4])
+        month = int(value[4:])
+        this_month = (year - 1970) * 12 + (month - 1)
+        return this_month + offset
+    
+    elif isinstance(value, int):
+        value += offset
+        year = 1970 + value // 12
+        month = (value % 12) + 1
+        return f"{year}{month:02d}"
+    
+    else:
+        raise ValueError("Input must be either YYYYMM string or integer months since Jan 1970")
+
+
+from datetime import datetime, timedelta
+
+def convert_day(value, offset=0):
+    """
+    Convert between days since epoch and YYYYMMDD.
+    Optional offset (days) can be added or subtracted.
+    """
+    epoch = datetime(1970, 1, 1)
+    
+    if isinstance(value, int):
+        date = epoch + timedelta(days=value + offset)
+        return date.strftime("%Y%m%d")
+    
+    elif isinstance(value, str) and len(value) == 8:
+        date = datetime.strptime(value, "%Y%m%d")
+        days_since_epoch = (date - epoch).days
+        return days_since_epoch + offset
+    
+    else:
+        raise ValueError("Input must be either integer days since epoch or YYYYMMDD string")
+
+
+def clean_out(
+    output: str,
+    *,
+    insert_zwsp: bool = True,
+    header_rule: str = "-",
+    header_align: str = "center",   # "center" or "left"
+    extra_right_pad: int = 1        # add a small extra space on the right of every column
+) -> str:
+    """
+    Rebuild a clean ASCII table from Beeline output quickly.
+    - Center-aligns header (configurable), left-aligns data
+    - Adds extra right padding per column (configurable)
+    - Optional zero-width space before right padding so double-click stops at cell end
+    """
+    ZWSP = "\u200b"
+
+    # 1) keep only table rows (those starting with '|')
+    lines = [ln for ln in output.splitlines() if ln.lstrip().startswith("|")]
+    if not lines:
+        return ""
+
+    # 2) split on '|' and trim cells
+    rows = [[cell.strip() for cell in ln.split("|")[1:-1]] for ln in lines]
+    headers, data = rows[0], rows[1:]
+    cols = len(headers)
+
+    # 3) compute max width per column (based on header + data)
+    widths = [0] * cols
+    for row in [headers] + data:
+        for i, cell in enumerate(row):
+            if len(cell) > widths[i]:
+                widths[i] = len(cell)
+
+    # 4) helpers to render lines quickly
+    def format_row(cells, is_header=False):
+        parts = ["|"]
+        for i, cell in enumerate(cells):
+            base_pad = widths[i] - len(cell)
+            if is_header and header_align.lower() == "center":
+                left_inner = base_pad // 2
+                right_inner = base_pad - left_inner + max(0, extra_right_pad)
+                # one leading space, left-inner pad, cell, (ZWSP), right-inner pad, space, pipe
+                piece = " " + (" " * left_inner) + cell
+                if insert_zwsp and right_inner > 0 and cell:
+                    piece += ZWSP
+                piece += (" " * right_inner) + " |"
+            else:
+                right_pad = base_pad + max(0, extra_right_pad)
+                piece = " " + cell
+                if insert_zwsp and right_pad > 0 and cell:
+                    piece += ZWSP
+                piece += (" " * right_pad) + " |"
+            parts.append(piece)
+        return "".join(parts)
+
+    def separator(ch="-"):
+        # each column width is content width + 2 spaces + extra_right_pad
+        return "+" + "+".join(ch * (widths[i] + 2 + max(0, extra_right_pad)) for i in range(cols)) + "+"
+
+    # 5) build table
+    out_lines = [
+        separator("-"),
+        format_row(headers, is_header=True),
+        separator(header_rule),         # keep '-' under headers if you want
+    ]
+    for row in data:
+        out_lines.append(format_row(row, is_header=False))
+    out_lines.append(separator("-"))
+
+    return "\n".join(out_lines)
 
