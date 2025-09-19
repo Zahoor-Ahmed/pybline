@@ -532,14 +532,30 @@ def is_dangerous_sql(sql_query):
     """
     Check if SQL query contains dangerous operations that could modify or delete data.
     Returns True if dangerous, False if safe.
+    
+    To enable/disable specific operations, comment or uncomment the lines below.
     """
     # Convert to uppercase for case-insensitive matching
     query_upper = sql_query.upper().strip()
     
-    # List of dangerous SQL keywords
+    # =============================================================================
+    # DANGEROUS SQL OPERATIONS CONFIGURATION
+    # =============================================================================
+    # Comment/uncomment lines below to enable/disable detection for specific operations
+    
+    # DELETION OPERATIONS
     dangerous_keywords = [
-        'DROP', 'DELETE', 'TRUNCATE', 'ALTER', 'UPDATE', 'INSERT', 
-        'CREATE', 'GRANT', 'REVOKE', 'EXECUTE', 'EXEC'
+        'DROP',           # DROP TABLE, DROP DATABASE, etc.
+        'DELETE',         # DELETE FROM table
+        'TRUNCATE',       # TRUNCATE TABLE
+        # 'ALTER',        # ALTER TABLE - COMMENTED OUT (often safe for schema changes)
+        # 'UPDATE',       # UPDATE table SET - COMMENTED OUT (often needed for data updates)
+        # 'INSERT',       # INSERT INTO - COMMENTED OUT (often needed for data insertion)
+        # 'CREATE',       # CREATE TABLE - COMMENTED OUT (often safe for new objects)
+        'GRANT',          # GRANT permissions
+        'REVOKE',         # REVOKE permissions
+        'EXECUTE',        # EXECUTE stored procedures
+        'EXEC'            # EXEC stored procedures
     ]
     
     # Check if query starts with any dangerous keyword
@@ -547,10 +563,18 @@ def is_dangerous_sql(sql_query):
         if query_upper.startswith(keyword):
             return True
     
-    # Additional checks for specific dangerous patterns
+    # =============================================================================
+    # ADDITIONAL DANGEROUS PATTERNS
+    # =============================================================================
+    # Comment/uncomment patterns below to enable/disable specific pattern detection
+    
     dangerous_patterns = [
-        r'\bDROP\b', r'\bDELETE\b', r'\bTRUNCATE\b', r'\bALTER\b',
-        r'\bUPDATE\b.*\bSET\b', r'\bINSERT\b.*\bINTO\b'
+        r'\bDROP\b',      # DROP anywhere in query
+        r'\bDELETE\b',    # DELETE anywhere in query
+        r'\bTRUNCATE\b',  # TRUNCATE anywhere in query
+        # r'\bALTER\b',   # ALTER anywhere in query - COMMENTED OUT
+        # r'\bUPDATE\b.*\bSET\b',  # UPDATE...SET pattern - COMMENTED OUT
+        # r'\bINSERT\b.*\bINTO\b'  # INSERT...INTO pattern - COMMENTED OUT
     ]
     
     for pattern in dangerous_patterns:
@@ -567,14 +591,15 @@ def get_detected_operation(sql_query):
     query_upper = sql_query.upper().strip()
     
     # Map of dangerous keywords to display names
+    # This should match the dangerous_keywords list in is_dangerous_sql()
     operation_map = {
         'DROP': 'DELETION',
         'DELETE': 'DELETION', 
         'TRUNCATE': 'DELETION',
-        'ALTER': 'MODIFICATION',
-        'UPDATE': 'MODIFICATION',
-        'INSERT': 'INSERTION',
-        'CREATE': 'CREATION',
+        'ALTER': 'MODIFICATION',      # Currently commented out in is_dangerous_sql
+        'UPDATE': 'MODIFICATION',     # Currently commented out in is_dangerous_sql
+        'INSERT': 'INSERTION',        # Currently commented out in is_dangerous_sql
+        'CREATE': 'CREATION',         # Currently commented out in is_dangerous_sql
         'GRANT': 'PERMISSION_GRANT',
         'REVOKE': 'PERMISSION_REVOKE',
         'EXECUTE': 'EXECUTION',
@@ -586,7 +611,7 @@ def get_detected_operation(sql_query):
         if query_upper.startswith(keyword):
             return operation_name
     
-    # Check for specific patterns
+    # Check for specific patterns (currently commented out in is_dangerous_sql)
     if re.search(r'\bUPDATE\b.*\bSET\b', query_upper):
         return 'MODIFICATION'
     elif re.search(r'\bINSERT\b.*\bINTO\b', query_upper):

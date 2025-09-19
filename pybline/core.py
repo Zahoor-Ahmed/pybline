@@ -5,7 +5,7 @@ import datetime
 from pathlib import Path
 
 from .ssh import ssh_connection
-from .utils import clean_sql, alert, clean_out
+from .utils import clean_sql, alert, clean_out, is_dangerous_sql, show_sql_confirmation_dialog
 from .config import BEELINE_CONFIG
 
 def beeline_session(shell, queue_name=None, timeout=10):
@@ -85,6 +85,13 @@ def extract_query_output(output, sql_query=None):
 def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
     if queue_name is None:
         queue_name = BEELINE_CONFIG().get("DEFAULT_QUEUE", "")
+
+    # Check for dangerous SQL operations
+    if is_dangerous_sql(sql_query):
+        if not show_sql_confirmation_dialog(sql_query):
+            if io:
+                print("SQL operation cancelled by user.")
+            return "", "Operation cancelled"
 
     ssh_client, shell = ssh_connection()
     beeline_session(shell, queue_name)
