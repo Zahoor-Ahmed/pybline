@@ -527,3 +527,121 @@ def clean_out(
 
     return "\n".join(out_lines)
 
+
+def is_dangerous_sql(sql_query):
+    """
+    Check if SQL query contains dangerous operations that could modify or delete data.
+    Returns True if dangerous, False if safe.
+    """
+    # Convert to uppercase for case-insensitive matching
+    query_upper = sql_query.upper().strip()
+    
+    # List of dangerous SQL keywords
+    dangerous_keywords = [
+        'DROP', 'DELETE', 'TRUNCATE', 'ALTER', 'UPDATE', 'INSERT', 
+        'CREATE', 'GRANT', 'REVOKE', 'EXECUTE', 'EXEC'
+    ]
+    
+    # Check if query starts with any dangerous keyword
+    for keyword in dangerous_keywords:
+        if query_upper.startswith(keyword):
+            return True
+    
+    # Additional checks for specific dangerous patterns
+    dangerous_patterns = [
+        r'\bDROP\b', r'\bDELETE\b', r'\bTRUNCATE\b', r'\bALTER\b',
+        r'\bUPDATE\b.*\bSET\b', r'\bINSERT\b.*\bINTO\b'
+    ]
+    
+    for pattern in dangerous_patterns:
+        if re.search(pattern, query_upper):
+            return True
+    
+    return False
+
+def get_detected_operation(sql_query):
+    """
+    Extract the detected dangerous operation from SQL query.
+    Returns the operation type in CAPS.
+    """
+    query_upper = sql_query.upper().strip()
+    
+    # Map of dangerous keywords to display names
+    operation_map = {
+        'DROP': 'DELETION',
+        'DELETE': 'DELETION', 
+        'TRUNCATE': 'DELETION',
+        'ALTER': 'MODIFICATION',
+        'UPDATE': 'MODIFICATION',
+        'INSERT': 'INSERTION',
+        'CREATE': 'CREATION',
+        'GRANT': 'PERMISSION_GRANT',
+        'REVOKE': 'PERMISSION_REVOKE',
+        'EXECUTE': 'EXECUTION',
+        'EXEC': 'EXECUTION'
+    }
+    
+    # Check which operation was detected
+    for keyword, operation_name in operation_map.items():
+        if query_upper.startswith(keyword):
+            return operation_name
+    
+    # Check for specific patterns
+    if re.search(r'\bUPDATE\b.*\bSET\b', query_upper):
+        return 'MODIFICATION'
+    elif re.search(r'\bINSERT\b.*\bINTO\b', query_upper):
+        return 'INSERTION'
+    
+    # Default fallback
+    return 'DANGEROUS'
+
+def show_sql_confirmation_dialog(sql_query):
+    """
+    Show a tkinter confirmation dialog for dangerous SQL operations.
+    Returns True if user confirms, False if user cancels.
+    """
+    # Import tkinter here to avoid circular imports
+    import tkinter as tk
+    from tkinter import messagebox
+    
+    # Play alert sound to draw attention
+    try:
+        alert(0)  # Play the first sound file (usually a warning sound)
+    except Exception:
+        pass  # Continue even if sound fails
+    
+    # Create root window (hidden)
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
+    
+    # Make the dialog appear on top of all windows and force attention
+    root.attributes('-topmost', True)
+    root.lift()  # Bring to front
+    root.focus_force()  # Force focus
+    
+    # Flash the taskbar icon to draw attention (Windows-specific)
+    try:
+        import ctypes
+        ctypes.windll.user32.FlashWindow(root.winfo_id(), True)
+    except Exception:
+        pass  # Continue even if flashing fails
+    
+    # Detect the operation type from the SQL query
+    detected_operation = get_detected_operation(sql_query)
+    
+    # Show confirmation dialog with enhanced visibility
+    result = messagebox.askyesno(
+        "⚠️ SENSITIVE OPERATION DETECTED ⚠️",
+        f"🚨 WARNING: {detected_operation} operation:\n\n"
+        f"Are you sure you want to proceed?",
+        icon='warning'
+    )
+    
+    # Destroy the root window
+    root.destroy()
+    
+    return result
+
+
+
+

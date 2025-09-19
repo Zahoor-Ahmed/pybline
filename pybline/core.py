@@ -82,21 +82,9 @@ def extract_query_output(output, sql_query=None):
     return output.strip(), ""
 
 
-def run_sql(sql_query, limit, queue_name=None, io=True, timeout=0, log_enabled=True):
+def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
     if queue_name is None:
         queue_name = BEELINE_CONFIG().get("DEFAULT_QUEUE", "")
-
-    # Handle limit parameter - function argument overrides SQL query LIMIT
-    if limit > 0:
-        # Remove any existing LIMIT clause from the query
-        sql_query = re.sub(r'\s+LIMIT\s+\d+', '', sql_query, flags=re.IGNORECASE)
-        # Add the function's limit
-        sql_query = sql_query.strip()
-        if not sql_query.endswith(';'):
-            sql_query += f" LIMIT {limit}"
-        else:
-            sql_query = sql_query[:-1] + f" LIMIT {limit};"
-    # If limit = 0, don't modify the query (use whatever LIMIT is in the query or no limit)
 
     ssh_client, shell = ssh_connection()
     beeline_session(shell, queue_name)
