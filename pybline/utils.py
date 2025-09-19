@@ -430,64 +430,100 @@ def clean_out(
 ) -> str:
     """
     Rebuild a clean ASCII table from Beeline output quickly.
+    Optimized for large tables with vectorized operations.
     - Center-aligns header (configurable), left-aligns data
     - Adds extra right padding per column (configurable)
     - Optional zero-width space before right padding so double-click stops at cell end
     """
     ZWSP = "\u200b"
 
-    # 1) keep only table rows (those starting with '|')
+    # 1) Fast filtering of table rows using list comprehension
     lines = [ln for ln in output.splitlines() if ln.lstrip().startswith("|")]
     if not lines:
         return ""
 
-    # 2) split on '|' and trim cells
-    rows = [[cell.strip() for cell in ln.split("|")[1:-1]] for ln in lines]
+    # 2) Optimized row parsing with pre-allocated lists
+    rows = []
+    for ln in lines:
+        # Split and strip in one pass, avoid double iteration
+        cells = ln.split("|")
+        if len(cells) >= 3:  # At least |cell|cell|
+            rows.append([cell.strip() for cell in cells[1:-1]])
+    
+    if not rows:
+        return ""
+    
     headers, data = rows[0], rows[1:]
     cols = len(headers)
 
-    # 3) compute max width per column (based on header + data)
-    widths = [0] * cols
-    for row in [headers] + data:
-        for i, cell in enumerate(row):
-            if len(cell) > widths[i]:
-                widths[i] = len(cell)
+    # 3) Vectorized width calculation - much faster for large datasets
+    if data:
+        # Convert to numpy arrays for vectorized operations (if available)
+        try:
+            import numpy as np
+            # Create array of cell lengths for all data rows
+            data_lengths = np.array([[len(cell) for cell in row] for row in data])
+            # Get max length per column
+            data_max_widths = np.max(data_lengths, axis=0)
+            # Compare with header lengths
+            header_lengths = np.array([len(cell) for cell in headers])
+            widths = np.maximum(data_max_widths, header_lengths).tolist()
+        except ImportError:
+            # Fallback to optimized Python approach
+            widths = [len(cell) for cell in headers]
+            for row in data:
+                for i, cell in enumerate(row):
+                    if len(cell) > widths[i]:
+                        widths[i] = len(cell)
+    else:
+        widths = [len(cell) for cell in headers]
 
-    # 4) helpers to render lines quickly
-    def format_row(cells, is_header=False):
+    # 4) Pre-calculate padding values to avoid repeated calculations
+    extra_pad = max(0, extra_right_pad)
+    is_center = header_align.lower() == "center"
+    
+    # Pre-calculate separator strings
+    sep_chars = ["-" * (widths[i] + 2 + extra_pad) for i in range(cols)]
+    separator_str = "+" + "+".join(sep_chars) + "+"
+    header_sep_str = "+" + "+".join(header_rule * (widths[i] + 2 + extra_pad) for i in range(cols)) + "+"
+
+    # 5) Optimized row formatting with pre-calculated values
+    def format_row_fast(cells, is_header=False):
+        if len(cells) != cols:
+            return None
+            
         parts = ["|"]
         for i, cell in enumerate(cells):
-            base_pad = widths[i] - len(cell)
-            if is_header and header_align.lower() == "center":
+            cell_len = len(cell)
+            base_pad = widths[i] - cell_len
+            
+            if is_header and is_center:
                 left_inner = base_pad // 2
-                right_inner = base_pad - left_inner + max(0, extra_right_pad)
-                # one leading space, left-inner pad, cell, (ZWSP), right-inner pad, space, pipe
-                piece = " " + (" " * left_inner) + cell
+                right_inner = base_pad - left_inner + extra_pad
+                # Build piece efficiently
+                piece = f" {' ' * left_inner}{cell}"
                 if insert_zwsp and right_inner > 0 and cell:
                     piece += ZWSP
-                piece += (" " * right_inner) + " |"
+                piece += f"{' ' * right_inner} |"
             else:
-                right_pad = base_pad + max(0, extra_right_pad)
-                piece = " " + cell
+                right_pad = base_pad + extra_pad
+                piece = f" {cell}"
                 if insert_zwsp and right_pad > 0 and cell:
                     piece += ZWSP
-                piece += (" " * right_pad) + " |"
+                piece += f"{' ' * right_pad} |"
             parts.append(piece)
         return "".join(parts)
 
-    def separator(ch="-"):
-        # each column width is content width + 2 spaces + extra_right_pad
-        return "+" + "+".join(ch * (widths[i] + 2 + max(0, extra_right_pad)) for i in range(cols)) + "+"
-
-    # 5) build table
+    # 6) Build output efficiently using list comprehension
     out_lines = [
-        separator("-"),
-        format_row(headers, is_header=True),
-        separator(header_rule),         # keep '-' under headers if you want
+        separator_str,
+        format_row_fast(headers, is_header=True),
+        header_sep_str,
     ]
-    for row in data:
-        out_lines.append(format_row(row, is_header=False))
-    out_lines.append(separator("-"))
+    
+    # Add data rows efficiently
+    out_lines.extend(format_row_fast(row, is_header=False) for row in data)
+    out_lines.append(separator_str)
 
     return "\n".join(out_lines)
 
