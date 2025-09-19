@@ -126,15 +126,42 @@ def daypartitions_to_sec(day_list):
     return [int(time.mktime(time.strptime(day, "%Y%m%d"))) for day in day_list]
 
 
+def _trim_zwsp_and_whitespace(text):
+    """
+    Trim both regular whitespace and all zero-width characters.
+    Optimized for vectorized operations with pandas.
+    """
+    if pd.isna(text) or text is None:
+        return text
+    
+    text_str = str(text)
+    
+    # Remove all zero-width characters (including ZWSP, ZWNJ, ZWJ, etc.)
+    zero_width_chars = [
+        '\u200b',  # Zero Width Space
+        '\u200c',  # Zero Width Non-Joiner
+        '\u200d',  # Zero Width Joiner
+        '\u2060',  # Word Joiner
+        '\ufeff',  # Zero Width No-Break Space (BOM)
+    ]
+    
+    for char in zero_width_chars:
+        text_str = text_str.replace(char, '')
+    
+    # Trim regular whitespace
+    return text_str.strip()
+
+
 def text_to_df(output):
     """
     Convert raw text output from Beeline SQL execution into a Pandas DataFrame.
+    Optimized for large datasets with efficient space and ZWSP trimming.
 
     Args:
         output (str): Raw output string from Beeline query execution.
 
     Returns:
-        pd.DataFrame: DataFrame representation of the query result.
+        pd.DataFrame: DataFrame representation of the query result with all spaces and ZWSP trimmed.
     """
     lines = output.strip().splitlines()
     divider_regex = re.compile(r'^[\+\-]+$', re.UNICODE)
@@ -148,7 +175,8 @@ def text_to_df(output):
             continue
         if counter == 2:
             counter += 1
-            header = [col.strip() for col in line.strip('| ').split(' | ')]
+            # Efficiently trim header columns including ZWSP
+            header = [_trim_zwsp_and_whitespace(col) for col in line.strip('| ').split(' | ')]
             continue
         if divider_regex.match(line.strip()) and counter == 3:
             counter += 1
@@ -157,12 +185,37 @@ def text_to_df(output):
             counter = 2
             continue
         else:
-            row = [cell.strip() for cell in line.strip('|').split(' | ')]
+            # Efficiently trim data row columns including ZWSP
+            row = [_trim_zwsp_and_whitespace(cell) for cell in line.strip('|').split(' | ')]
             if len(row) < len(header):
                 row += [None] * (len(header) - len(row))
             if len(row) == len(header):
                 processed_lines.append(row)
+    
+    # Create DataFrame and apply comprehensive trimming to all string columns
     df = pd.DataFrame(processed_lines, columns=header)
+    
+    # Fast trimming for all string columns - much faster than applying to each cell
+    if not df.empty:
+        # Define all zero-width characters to remove
+        zero_width_chars = ['\u200b', '\u200c', '\u200d', '\u2060', '\ufeff']
+        
+        # Trim column names including all zero-width characters
+        for char in zero_width_chars:
+            df.columns = df.columns.str.replace(char, '', regex=False)
+        df.columns = df.columns.str.strip()
+        
+        # Trim all string values in the DataFrame efficiently including all zero-width characters
+        # This is much faster than iterating through each cell
+        for col in df.columns:
+            if df[col].dtype == 'object':  # String columns
+                # Remove all zero-width characters and trim whitespace
+                for char in zero_width_chars:
+                    df[col] = df[col].astype(str).str.replace(char, '', regex=False)
+                df[col] = df[col].str.strip()
+                # Convert 'None' strings back to None for consistency
+                df[col] = df[col].replace('None', None)
+    
     return df
 
 

@@ -96,6 +96,9 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
 
     output = ''
     start_time = time.time()
+    row_count = 0
+    progress_printed = False
+    
     while True:
         if timeout > 0 and time.time() - start_time > timeout:
             print("Timeout reached, exiting loop.")
@@ -107,6 +110,21 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
         if shell.recv_ready():
             new_data = shell.recv(65535).decode('utf-8')
             output += new_data
+            
+            # Count rows in the new data for progress tracking
+            if io:  # Only show progress if io is enabled
+                new_lines = new_data.count('\n')
+                if new_lines > 0:
+                    # Count data rows (lines that start with | and contain data)
+                    data_lines = [line for line in new_data.split('\n') 
+                                if line.strip().startswith('|') and not line.strip().startswith('+')]
+                    row_count += len(data_lines)
+                    
+                    # Print progress on the same line
+                    if row_count > 0:
+                        print(f"\rTotal rows fetched = {row_count}", end='', flush=True)
+                        progress_printed = True
+            
             if any(x in new_data for x in ["rows selected", "No rows selected", "row selected", "Error"]):
                 try:
                     alert()
@@ -115,6 +133,10 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
                 break
         else:
             time.sleep(0.001)
+    
+    # Clear the progress line if it was printed
+    if progress_printed and io:
+        print("\r" + " " * 50 + "\r", end='', flush=True)
 
     query_output, rows = extract_query_output(output)
 
