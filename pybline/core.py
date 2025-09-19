@@ -82,9 +82,21 @@ def extract_query_output(output, sql_query=None):
     return output.strip(), ""
 
 
-def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
+def run_sql(sql_query, limit, queue_name=None, io=True, timeout=0, log_enabled=True):
     if queue_name is None:
         queue_name = BEELINE_CONFIG().get("DEFAULT_QUEUE", "")
+
+    # Handle limit parameter - function argument overrides SQL query LIMIT
+    if limit > 0:
+        # Remove any existing LIMIT clause from the query
+        sql_query = re.sub(r'\s+LIMIT\s+\d+', '', sql_query, flags=re.IGNORECASE)
+        # Add the function's limit
+        sql_query = sql_query.strip()
+        if not sql_query.endswith(';'):
+            sql_query += f" LIMIT {limit}"
+        else:
+            sql_query = sql_query[:-1] + f" LIMIT {limit};"
+    # If limit = 0, don't modify the query (use whatever LIMIT is in the query or no limit)
 
     ssh_client, shell = ssh_connection()
     beeline_session(shell, queue_name)
@@ -96,8 +108,9 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
 
     output = ''
     start_time = time.time()
-    row_count = 0
     progress_printed = False
+    last_row_count = 0
+    seen_rows = set()  # Track unique rows across all iterations
     
     while True:
         if timeout > 0 and time.time() - start_time > timeout:
@@ -111,19 +124,27 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
             new_data = shell.recv(65535).decode('utf-8')
             output += new_data
             
-            # Count rows in the new data for progress tracking
+            # Count actual data rows for progress tracking
             if io:  # Only show progress if io is enabled
-                new_lines = new_data.count('\n')
-                if new_lines > 0:
-                    # Count data rows (lines that start with | and contain data)
-                    data_lines = [line for line in new_data.split('\n') 
-                                if line.strip().startswith('|') and not line.strip().startswith('+')]
-                    row_count += len(data_lines)
-                    
-                    # Print progress on the same line
-                    if row_count > 0:
-                        print(f"\rTotal rows fetched = {row_count}", end='', flush=True)
-                        progress_printed = True
+                lines = output.split('\n')
+                data_row_count = 0
+                
+                for line in lines:
+                    line = line.strip()
+                    # Skip dashed lines (start with + and contain -)
+                    if line.startswith('+') and '-' in line:
+                        continue
+                    # Count lines that start with | and are data rows (not headers)
+                    if line.startswith('|') and not line.startswith('+'):
+                        # Skip header rows (contain column names like ID, TAC)
+                        if 'ID' in line and 'TAC' in line:
+                            continue
+                        # This is a data row
+                        data_row_count += 1
+                
+                # Show progress
+                print(f"\rTotal rows fetched = {data_row_count}", end='', flush=True)
+                progress_printed = True
             
             if any(x in new_data for x in ["rows selected", "No rows selected", "row selected", "Error"]):
                 try:
@@ -136,6 +157,8 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
     
     # Clear the progress line if it was printed
     if progress_printed and io:
+        # Add delay to show the final row count before clearing
+        time.sleep(1.5)
         print("\r" + " " * 50 + "\r", end='', flush=True)
 
     query_output, rows = extract_query_output(output)
