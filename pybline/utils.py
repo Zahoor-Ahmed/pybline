@@ -548,10 +548,10 @@ def is_dangerous_sql(sql_query):
         'DROP',           # DROP TABLE, DROP DATABASE, etc.
         'DELETE',         # DELETE FROM table
         'TRUNCATE',       # TRUNCATE TABLE
-        # 'ALTER',        # ALTER TABLE - COMMENTED OUT (often safe for schema changes)
-        # 'UPDATE',       # UPDATE table SET - COMMENTED OUT (often needed for data updates)
-        # 'INSERT',       # INSERT INTO - COMMENTED OUT (often needed for data insertion)
-        # 'CREATE',       # CREATE TABLE - COMMENTED OUT (often safe for new objects)
+        'ALTER',        # ALTER TABLE - COMMENTED OUT (often safe for schema changes)
+        'UPDATE',       # UPDATE table SET - COMMENTED OUT (often needed for data updates)
+        'INSERT',       # INSERT INTO - COMMENTED OUT (often needed for data insertion)
+        'CREATE',       # CREATE TABLE - COMMENTED OUT (often safe for new objects)
         'GRANT',          # GRANT permissions
         'REVOKE',         # REVOKE permissions
         'EXECUTE',        # EXECUTE stored procedures
@@ -629,11 +629,6 @@ def show_sql_confirmation_dialog(sql_query):
     import tkinter as tk
     from tkinter import messagebox
     
-    # Play alert sound to draw attention
-    try:
-        alert(0)  # Play the first sound file (usually a warning sound)
-    except Exception:
-        pass  # Continue even if sound fails
     
     # Create root window (hidden)
     root = tk.Tk()
