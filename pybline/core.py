@@ -82,12 +82,12 @@ def extract_query_output(output, sql_query=None):
     return output.strip(), ""
 
 
-def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
+def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True, warn=True):
     if queue_name is None:
         queue_name = BEELINE_CONFIG().get("DEFAULT_QUEUE", "")
 
-    # Check for dangerous SQL operations
-    if is_dangerous_sql(sql_query):
+    # Check for dangerous SQL operations (controllable via warn flag)
+    if warn and is_dangerous_sql(sql_query):
         if not show_sql_confirmation_dialog(sql_query):
             if io:
                 print("SQL operation cancelled by user.")
