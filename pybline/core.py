@@ -123,18 +123,27 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True):
             if io:  # Only show progress if io is enabled
                 lines = output.split('\n')
                 data_row_count = 0
-                
-                for line in lines:
-                    line = line.strip()
-                    # Skip dashed lines (start with + and contain -)
-                    if line.startswith('+') and '-' in line:
+
+                def is_dashed_border(s: str) -> bool:
+                    s = s.strip()
+                    return s.startswith('+') and '-' in s
+
+                for i in range(len(lines)):
+                    line = lines[i].strip()
+
+                    # Skip dashed border lines
+                    if is_dashed_border(line):
                         continue
-                    # Count lines that start with | and are data rows (not headers)
-                    if line.startswith('|') and not line.startswith('+'):
-                        # Skip header rows (contain column names like ID, TAC)
-                        if 'ID' in line and 'TAC' in line:
+
+                    # Count only table rows starting with '|'
+                    if line.startswith('|'):
+                        prev_line = lines[i - 1].strip() if i > 0 else ''
+                        next_line = lines[i + 1].strip() if i + 1 < len(lines) else ''
+
+                        # Skip header lines which are surrounded by dashed borders
+                        if is_dashed_border(prev_line) and is_dashed_border(next_line):
                             continue
-                        # This is a data row
+
                         data_row_count += 1
                 
                 # Show progress

@@ -23,6 +23,9 @@ Thumbs.db
 # Logs and user-defined folders
 xlogs/
 
+# Raw Data folder
+Raw Data/
+
 # VS Code settings (optional)
 .vscode/
 examples.ipynb
