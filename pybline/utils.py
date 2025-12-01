@@ -15,6 +15,7 @@ from pathlib import Path
 import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 import pygame # type: ignore
+from .config import POSTGRES_CONFIG
 def alert(index=0):
     """
     Play a system beep sound as a simple alert.
@@ -320,6 +321,9 @@ def set_env(interactive=True):
                 "remote_path": ask("Remote path for uploads"),
                 "hostkey": ask("SSH host key fingerprint"),
                 "export_dir": ask("Export directory path")
+            },
+            "POSTGRES_CONFIG": {
+                "password": ask("PostgreSQL password")
             }
         }
 
@@ -348,6 +352,9 @@ def set_env(interactive=True):
                 "remote_path": "/remote/upload/path",
                 "hostkey": "host key fingerprint here",
                 "export_dir": "/export/path"
+            },
+            "POSTGRES_CONFIG": {
+                "password": "your_postgres_password"
             }
         }
 
@@ -662,6 +669,199 @@ def show_sql_confirmation_dialog(sql_query):
     
     return result
 
+
+def df2postgres(df, pg_table, pg_user, pg_db, pg_host="localhost", pg_port=5432, overwrite=False, append=False):
+    """
+    Insert a pandas DataFrame into a PostgreSQL table.
+    Creates the table if it doesn't exist based on DataFrame schema.
+    PostgreSQL password is read from configuration file (~/.pybline_config.json).
+    
+    Args:
+        df (pd.DataFrame): The pandas DataFrame to insert
+        pg_table (str): PostgreSQL table name
+        pg_user (str): PostgreSQL username
+        pg_db (str): PostgreSQL database name
+        pg_host (str): PostgreSQL host (default: "localhost")
+        pg_port (int): PostgreSQL port (default: 5432)
+        overwrite (bool): If True, drop and recreate table (append is ignored). If False, behavior depends on append parameter (default: False)
+        append (bool): If True and overwrite=False, append data to existing table. If False and overwrite=False, only insert if table doesn't exist (default: False)
+    
+    Behavior:
+        - overwrite=True: Drop table if exists, create new table, insert data (append is ignored)
+        - overwrite=False, append=True: Append data if table exists, or create and insert if table doesn't exist
+        - overwrite=False, append=False: Only create and insert if table doesn't exist, warn and skip if table exists
+    
+    Returns:
+        None
+    """
+    import psycopg2
+    from psycopg2.extras import execute_values
+    
+    # Validate input
+    if df.empty:
+        print("⚠️ DataFrame is empty. Nothing to insert.")
+        return
+    
+    # Get PostgreSQL password from config
+    try:
+        pg_pass = POSTGRES_CONFIG().get("password", "")
+        if not pg_pass:
+            print("❌ Error: PostgreSQL password not found in configuration.")
+            print("   Please run pybline.set_env() to configure PostgreSQL settings.")
+            return
+    except Exception as e:
+        print(f"❌ Error loading PostgreSQL configuration: {e}")
+        print("   Please run pybline.set_env() to configure PostgreSQL settings.")
+        return
+    
+    # Connect to PostgreSQL
+    try:
+        conn = psycopg2.connect(
+            host=pg_host,
+            port=pg_port,
+            dbname=pg_db,
+            user=pg_user,
+            password=pg_pass
+        )
+        cur = conn.cursor()
+    except Exception as e:
+        print(f"❌ Error connecting to PostgreSQL: {e}")
+        return
+    
+    try:
+        # Map pandas dtypes to PostgreSQL types
+        def pandas_to_postgres_type(dtype):
+            if pd.api.types.is_integer_dtype(dtype):
+                return "BIGINT"
+            elif pd.api.types.is_float_dtype(dtype):
+                return "DOUBLE PRECISION"
+            elif pd.api.types.is_bool_dtype(dtype):
+                return "BOOLEAN"
+            elif pd.api.types.is_datetime64_any_dtype(dtype):
+                return "TIMESTAMP"
+            elif str(dtype).startswith('date') or 'date' in str(dtype).lower():
+                return "DATE"
+            else:
+                return "TEXT"
+        
+        # Helper function to clean column names for PostgreSQL
+        def clean_column_name(col_name):
+            """Clean column name to be PostgreSQL-compatible"""
+            clean_col = col_name.replace(' ', '_').replace('-', '_')
+            # Remove any characters that aren't alphanumeric or underscore
+            clean_col = ''.join(c if c.isalnum() or c == '_' else '_' for c in clean_col)
+            # Ensure it doesn't start with a number
+            if clean_col and clean_col[0].isdigit():
+                clean_col = '_' + clean_col
+            return clean_col
+        
+        # Clean DataFrame column names
+        df_clean = df.copy()
+        column_mapping = {}
+        cleaned_columns = []
+        for col in df.columns:
+            clean_col = clean_column_name(col)
+            cleaned_columns.append(clean_col)
+            if clean_col != col:
+                column_mapping[col] = clean_col
+        
+        # Rename DataFrame columns if needed
+        if column_mapping:
+            df_clean.rename(columns=column_mapping, inplace=True)
+        
+        # Handle overwrite option (takes precedence over append)
+        if overwrite:
+            cur.execute(f"DROP TABLE IF EXISTS {pg_table};")
+            conn.commit()
+            print(f"✅ Dropped existing table '{pg_table}' (overwrite=True)")
+            if append:
+                print(f"ℹ️ Note: append=True is ignored when overwrite=True")
+        
+        # Check if table exists
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = %s
+            );
+        """, (pg_table,))
+        table_exists = cur.fetchone()[0]
+        
+        # Handle different combinations of overwrite and append
+        if overwrite:
+            # overwrite=True: Always create new table and insert
+            # Generate column definitions from DataFrame
+            columns = []
+            for i, col in enumerate(df.columns):
+                pg_type = pandas_to_postgres_type(df[col].dtype)
+                clean_col = cleaned_columns[i]
+                columns.append(f'"{clean_col}" {pg_type}')
+            
+            create_table_sql = f"""
+                CREATE TABLE {pg_table} (
+                    {', '.join(columns)}
+                );
+            """
+            cur.execute(create_table_sql)
+            conn.commit()
+            print(f"✅ Created table '{pg_table}' with {len(df.columns)} columns")
+        
+        elif table_exists:
+            # overwrite=False and table exists
+            if append:
+                # Append mode: just insert data into existing table
+                print(f"ℹ️ Table '{pg_table}' already exists. Appending {len(df)} rows...")
+            else:
+                # No append: warn and exit
+                print(f"⚠️ Warning: Table '{pg_table}' already exists and append=False.")
+                print(f"   No data will be inserted. Set append=True to add data, or overwrite=True to replace the table.")
+                cur.close()
+                conn.close()
+                return
+        
+        else:
+            # overwrite=False and table doesn't exist: create and insert
+            # Generate column definitions from DataFrame
+            columns = []
+            for i, col in enumerate(df.columns):
+                pg_type = pandas_to_postgres_type(df[col].dtype)
+                clean_col = cleaned_columns[i]
+                columns.append(f'"{clean_col}" {pg_type}')
+            
+            create_table_sql = f"""
+                CREATE TABLE {pg_table} (
+                    {', '.join(columns)}
+                );
+            """
+            cur.execute(create_table_sql)
+            conn.commit()
+            print(f"✅ Created table '{pg_table}' with {len(df.columns)} columns")
+        
+        # Get column names (use cleaned names)
+        columns_list = [f'"{col}"' for col in df_clean.columns]
+        columns_str = ', '.join(columns_list)
+        
+        # Convert DataFrame to list of tuples for insertion
+        # Replace NaN with None for PostgreSQL NULL
+        values = [tuple(None if pd.isna(val) else val for val in row) for row in df_clean.values]
+        
+        # Insert data using execute_values for efficiency
+        insert_sql = f"""
+            INSERT INTO {pg_table} ({columns_str})
+            VALUES %s;
+        """
+        execute_values(cur, insert_sql, values)
+        conn.commit()
+        
+        print(f"✅ Successfully inserted {len(df)} rows into '{pg_table}'")
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"❌ Error inserting data: {e}")
+        raise
+    finally:
+        cur.close()
+        conn.close()
 
 
 

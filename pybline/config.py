@@ -28,3 +28,6 @@ def BEELINE_CONFIG():
 
 def WINSCP_CONFIG():
     return load_config().get("WINSCP_CONFIG", {})
+
+def POSTGRES_CONFIG():
+    return load_config().get("POSTGRES_CONFIG", {})

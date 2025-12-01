@@ -23,7 +23,8 @@ setup(
         "pynacl>=1.5,<2.0",
         "pandas>=2.2.3,<3.0.0",
         "ipython==8.12.3",
-        "pygame>=2.6.1,<3.0.0"
+        "pygame>=2.6.1,<3.0.0",
+        "psycopg2-binary>=2.9.0,<3.0.0"
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
