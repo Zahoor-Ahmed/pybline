@@ -15,7 +15,7 @@ This package provides high-level utilities for:
 from .ssh import ssh_connection, run_shell, run_shell_blocking
 from .core import beeline_session, run_sql
 from .fileops import upload_file, download_file, df_to_Table, table_to_df, download_df
-from .utils import alert, text_to_df, to_sql_inlist, todayx, this_monthx, export, daypartitions, daypartitions_to_sec, set_env, convert_day, convert_month, clean_out, df2postgres
+from .utils import alert, text_to_df, to_sql_inlist, todayx, this_monthx, export, daypartitions, daypartitions_to_sec, set_env, convert_day, convert_month, clean_out, df2postgres, postgres2df
 # from .meta import confirm_table_size
 try:
     from .ipython import register_sql_magic
@@ -27,7 +27,7 @@ _all_ = [
     'ssh_connection', 'run_shell', 'run_shell_blocking',
     'beeline_session', 'run_sql',
     'upload_file', 'download_file', 'df_to_Table', 'table_to_df', 'download_df',
-    'alert', 'text_to_df', 'to_sql_inlist', 'todayx', 'this_monthx', 'export', 'daypartitions', 'daypartitions_to_sec', 'set_env', 'df2postgres',
+    'alert', 'text_to_df', 'to_sql_inlist', 'todayx', 'this_monthx', 'export', 'daypartitions', 'daypartitions_to_sec', 'set_env', 'df2postgres', 'postgres2df',
     'register_sql_magic'
 ]
 

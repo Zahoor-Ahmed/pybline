@@ -769,9 +769,12 @@ def df2postgres(df, pg_table, pg_user, pg_db, pg_host="localhost", pg_port=5432,
         if column_mapping:
             df_clean.rename(columns=column_mapping, inplace=True)
         
+        # Quote table name for PostgreSQL (handles names starting with numbers or special chars)
+        pg_table_quoted = f'"{pg_table}"'
+        
         # Handle overwrite option (takes precedence over append)
         if overwrite:
-            cur.execute(f"DROP TABLE IF EXISTS {pg_table};")
+            cur.execute(f"DROP TABLE IF EXISTS {pg_table_quoted};")
             conn.commit()
             print(f"✅ Dropped existing table '{pg_table}' (overwrite=True)")
             if append:
@@ -798,7 +801,7 @@ def df2postgres(df, pg_table, pg_user, pg_db, pg_host="localhost", pg_port=5432,
                 columns.append(f'"{clean_col}" {pg_type}')
             
             create_table_sql = f"""
-                CREATE TABLE {pg_table} (
+                CREATE TABLE {pg_table_quoted} (
                     {', '.join(columns)}
                 );
             """
@@ -829,7 +832,7 @@ def df2postgres(df, pg_table, pg_user, pg_db, pg_host="localhost", pg_port=5432,
                 columns.append(f'"{clean_col}" {pg_type}')
             
             create_table_sql = f"""
-                CREATE TABLE {pg_table} (
+                CREATE TABLE {pg_table_quoted} (
                     {', '.join(columns)}
                 );
             """
@@ -847,7 +850,7 @@ def df2postgres(df, pg_table, pg_user, pg_db, pg_host="localhost", pg_port=5432,
         
         # Insert data using execute_values for efficiency
         insert_sql = f"""
-            INSERT INTO {pg_table} ({columns_str})
+            INSERT INTO {pg_table_quoted} ({columns_str})
             VALUES %s;
         """
         execute_values(cur, insert_sql, values)
@@ -861,6 +864,72 @@ def df2postgres(df, pg_table, pg_user, pg_db, pg_host="localhost", pg_port=5432,
         raise
     finally:
         cur.close()
+        conn.close()
+
+
+def postgres2df(pg_table, pg_user, pg_db, pg_host="localhost", pg_port=5432, query=None):
+    """
+    Read a PostgreSQL table into a pandas DataFrame.
+    Useful for loading data into Streamlit apps or other Python applications.
+    
+    Args:
+        pg_table (str): PostgreSQL table name
+        pg_user (str): PostgreSQL username
+        pg_db (str): PostgreSQL database name
+        pg_host (str): PostgreSQL host (default: "localhost")
+        pg_port (int): PostgreSQL port (default: 5432)
+        query (str, optional): Custom SQL query. If None, reads entire table (default: None)
+    
+    Returns:
+        pd.DataFrame: DataFrame containing the table data
+    """
+    import psycopg2
+    
+    # Get PostgreSQL password from config
+    try:
+        pg_pass = POSTGRES_CONFIG().get("password", "")
+        if not pg_pass:
+            print("❌ Error: PostgreSQL password not found in configuration.")
+            print("   Please run pybline.set_env() to configure PostgreSQL settings.")
+            return pd.DataFrame()
+    except Exception as e:
+        print(f"❌ Error loading PostgreSQL configuration: {e}")
+        print("   Please run pybline.set_env() to configure PostgreSQL settings.")
+        return pd.DataFrame()
+    
+    # Connect to PostgreSQL
+    try:
+        conn = psycopg2.connect(
+            host=pg_host,
+            port=pg_port,
+            dbname=pg_db,
+            user=pg_user,
+            password=pg_pass
+        )
+    except Exception as e:
+        print(f"❌ Error connecting to PostgreSQL: {e}")
+        return pd.DataFrame()
+    
+    try:
+        # Quote table name for PostgreSQL (handles names starting with numbers or special chars)
+        pg_table_quoted = f'"{pg_table}"'
+        
+        # Use custom query if provided, otherwise select all from table
+        if query:
+            sql_query = query
+        else:
+            sql_query = f'SELECT * FROM {pg_table_quoted};'
+        
+        # Read table into DataFrame
+        df = pd.read_sql_query(sql_query, conn)
+        
+        print(f"✅ Successfully loaded {len(df)} rows from '{pg_table}'")
+        return df
+        
+    except Exception as e:
+        print(f"❌ Error reading data: {e}")
+        return pd.DataFrame()
+    finally:
         conn.close()
 
 
