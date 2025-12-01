@@ -5,7 +5,7 @@ import datetime
 from pathlib import Path
 
 from .ssh import ssh_connection
-from .utils import clean_sql, alert, clean_out, is_dangerous_sql, show_sql_confirmation_dialog
+from .utils import clean_sql, alert as play_alert_sound, clean_out, is_dangerous_sql, show_sql_confirmation_dialog
 from .config import BEELINE_CONFIG
 
 def beeline_session(shell, queue_name=None, timeout=10):
@@ -82,7 +82,7 @@ def extract_query_output(output, sql_query=None):
     return output.strip(), ""
 
 
-def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True, warn=True):
+def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True, warn=True, alert=True):
     if queue_name is None:
         queue_name = BEELINE_CONFIG().get("DEFAULT_QUEUE", "")
 
@@ -110,10 +110,11 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True, wa
     while True:
         if timeout > 0 and time.time() - start_time > timeout:
             print("Timeout reached, exiting loop.")
-            try:
-                alert()
-            except Exception:
-                pass
+            if alert:
+                try:
+                    play_alert_sound()
+                except Exception:
+                    pass
             break
         if shell.recv_ready():
             new_data = shell.recv(65535).decode('utf-8')
@@ -151,10 +152,11 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True, wa
                 progress_printed = True
             
             if any(x in new_data for x in ["rows selected", "No rows selected", "row selected", "Error"]):
-                try:
-                    alert()
-                except Exception:
-                    pass
+                if alert:
+                    try:
+                        play_alert_sound()
+                    except Exception:
+                        pass
                 break
         else:
             time.sleep(0.001)
