@@ -153,6 +153,88 @@ def _trim_zwsp_and_whitespace(text):
     return text_str.strip()
 
 
+def pgsql_to_df(output):
+    """
+    Convert text output from run_pgsql() into a Pandas DataFrame.
+    Parses the space-separated table format from pandas DataFrame.to_string().
+
+    Args:
+        output (str): Raw output string from run_pgsql() query execution.
+
+    Returns:
+        pd.DataFrame: DataFrame representation of the query result.
+    """
+    if not output or not output.strip():
+        return pd.DataFrame()
+    
+    lines = output.strip().splitlines()
+    if len(lines) < 1:
+        return pd.DataFrame()
+    
+    # First line is the header
+    header_line = lines[0].strip()
+    if not header_line:
+        return pd.DataFrame()
+    
+    # Parse header - split by multiple spaces (2+ spaces indicate column boundaries)
+    # Use regex to split on 2+ spaces
+    header = re.split(r'\s{2,}', header_line)
+    header = [col.strip() for col in header if col.strip()]
+    
+    if not header:
+        return pd.DataFrame()
+    
+    # Parse data rows
+    data_rows = []
+    for line in lines[1:]:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Split by multiple spaces (2+ spaces) to match column boundaries
+        row = re.split(r'\s{2,}', line)
+        row = [cell.strip() if cell.strip() else None for cell in row]
+        
+        # Pad or truncate to match header length
+        if len(row) < len(header):
+            row += [None] * (len(header) - len(row))
+        elif len(row) > len(header):
+            row = row[:len(header)]
+        
+        if len(row) == len(header):
+            data_rows.append(row)
+    
+    # Create DataFrame
+    df = pd.DataFrame(data_rows, columns=header)
+    
+    # Clean up the DataFrame
+    if not df.empty:
+        # Trim column names
+        df.columns = df.columns.str.strip()
+        
+        # Convert 'NULL' strings to None
+        df = df.replace('NULL', None)
+        df = df.replace('', None)
+        
+        # Try to infer numeric types
+        for col in df.columns:
+            # Skip if all values are None
+            if df[col].isna().all():
+                continue
+            
+            # Try to convert to numeric
+            try:
+                # Replace None with NaN for conversion
+                numeric_series = pd.to_numeric(df[col], errors='coerce')
+                # If conversion was successful for most values, use it
+                if numeric_series.notna().sum() > len(df) * 0.5:
+                    df[col] = numeric_series
+            except Exception:
+                pass
+    
+    return df
+
+
 def text_to_df(output):
     """
     Convert raw text output from Beeline SQL execution into a Pandas DataFrame.
