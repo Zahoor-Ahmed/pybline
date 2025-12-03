@@ -16,7 +16,7 @@ import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 import pygame # type: ignore
 from .config import POSTGRES_CONFIG
-def alert(index=0):
+def alert(index=53):
     """
     Play a system beep sound as a simple alert.
     Useful for notifying users after long-running operations.
@@ -157,14 +157,24 @@ def pgsql_to_df(output):
     """
     Convert text output from run_pgsql() into a Pandas DataFrame.
     Parses the fixed-width table format from pandas DataFrame.to_string().
+    
+    Note: If run_pgsql() returns a DataFrame directly (new behavior), 
+    this function will detect and return it as-is. For new code, 
+    use: df, rows = pb.run_pgsql(query) instead.
 
     Args:
-        output (str): Raw output string from run_pgsql() query execution.
+        output (str or pd.DataFrame): Raw output string from run_pgsql() query execution,
+                                       or a DataFrame (if run_pgsql() returns DataFrame directly).
 
     Returns:
         pd.DataFrame: DataFrame representation of the query result.
     """
-    if not output or not output.strip():
+    # If output is already a DataFrame, return it directly
+    if isinstance(output, pd.DataFrame):
+        return output
+    
+    # Handle empty or None input
+    if not output or (isinstance(output, str) and not output.strip()):
         return pd.DataFrame()
     
     lines = output.strip().splitlines()
@@ -175,111 +185,21 @@ def pgsql_to_df(output):
     if not header_line.strip():
         return pd.DataFrame()
     
-    # Detect column boundaries by analyzing the header and data rows
-    # Find positions where columns start by looking for 2+ consecutive spaces
-    def find_column_boundaries(text_lines):
-        """Find column start positions by analyzing spacing patterns."""
-        if not text_lines:
-            return []
-        
-        # Find all positions with 2+ spaces across all lines
-        space_positions = set()
-        for line in text_lines:
-            i = 0
-            while i < len(line):
-                if line[i] == ' ':
-                    # Count consecutive spaces
-                    space_start = i
-                    while i < len(line) and line[i] == ' ':
-                        i += 1
-                    space_count = i - space_start
-                    # If 2+ spaces, mark the position after the spaces as a potential column start
-                    if space_count >= 2 and i < len(line):
-                        space_positions.add(i)
-                else:
-                    i += 1
-        
-        # Also check for transitions: non-space to space (end of column) and space to non-space (start)
-        boundaries = [0]  # First column always starts at 0
-        
-        # Analyze the header line more carefully
-        # Find where column names end (non-space followed by 2+ spaces)
-        i = 0
-        while i < len(header_line):
-            if header_line[i] != ' ':
-                # Look ahead for 2+ spaces
-                j = i + 1
-                while j < len(header_line) and header_line[j] == ' ':
-                    j += 1
-                if j - i - 1 >= 2:  # Found 2+ spaces after this column
-                    # The next column starts at j
-                    if j not in boundaries:
-                        boundaries.append(j)
-                    i = j
-                else:
-                    i += 1
-            else:
-                i += 1
-        
-        # Sort and remove duplicates
-        boundaries = sorted(set(boundaries))
-        
-        # Add end position
-        max_len = max(len(line) for line in text_lines if line.strip())
-        if boundaries[-1] < max_len:
-            boundaries.append(max_len)
-        
-        return boundaries
-    
+    # Use pandas read_fwf with column inference - this is more reliable
     try:
-        # Find column boundaries
-        boundaries = find_column_boundaries(lines[:min(20, len(lines))])  # Analyze first 20 rows
+        from io import StringIO
         
-        if len(boundaries) < 2:
-            # Fallback: use regex split
-            header = re.split(r'\s{2,}', header_line.strip())
-            header = [col.strip() for col in header if col.strip()]
-        else:
-            # Extract column names using boundaries
-            header = []
-            for i in range(len(boundaries) - 1):
-                start = boundaries[i]
-                end = boundaries[i + 1] if i + 1 < len(boundaries) else len(header_line)
-                col_name = header_line[start:end].strip()
-                if col_name:
-                    header.append(col_name)
+        # Create a file-like object from the output
+        full_text = '\n'.join(lines)
         
-        if not header:
-            return pd.DataFrame()
-        
-        # Parse data rows using the boundaries
-        data_rows = []
-        for line in lines[1:]:
-            if not line.strip():
-                continue
-            
-            row = []
-            for i in range(len(boundaries) - 1):
-                start = boundaries[i]
-                end = boundaries[i + 1] if i + 1 < len(boundaries) else len(line)
-                cell = line[start:end].strip() if start < len(line) else ''
-                
-                # Convert empty strings and 'NULL' to None
-                if not cell or cell.upper() == 'NULL':
-                    row.append(None)
-                else:
-                    row.append(cell)
-            
-            # Ensure row has same length as header
-            while len(row) < len(header):
-                row.append(None)
-            row = row[:len(header)]
-            
-            if len(row) == len(header):
-                data_rows.append(row)
-        
-        # Create DataFrame
-        df = pd.DataFrame(data_rows, columns=header)
+        # Use read_fwf with infer_nrows to auto-detect column boundaries
+        # This analyzes multiple rows to determine optimal column widths
+        df = pd.read_fwf(
+            StringIO(full_text),
+            infer_nrows=min(len(lines), 50),  # Analyze up to 50 rows for better detection
+            header=0,
+            skip_blank_lines=True
+        )
         
         # Clean up the DataFrame
         if not df.empty:
@@ -302,6 +222,157 @@ def pgsql_to_df(output):
                     pass
         
         return df
+        
+    except Exception as e:
+        # Fallback: Manual boundary detection with improved algorithm
+        def find_column_boundaries_improved(text_lines):
+            """Improved column boundary detection using multiple strategies."""
+            if not text_lines:
+                return []
+            
+            boundaries = [0]  # First column always starts at 0
+            
+            # Strategy 1: Find positions where 2+ spaces occur consistently across rows
+            # This indicates column separators
+            candidate_positions = {}
+            for line in text_lines[:min(20, len(text_lines))]:
+                i = 0
+                while i < len(line):
+                    if line[i] == ' ':
+                        space_start = i
+                        while i < len(line) and line[i] == ' ':
+                            i += 1
+                        space_count = i - space_start
+                        if space_count >= 2 and i < len(line):
+                            # Position after spaces is a candidate
+                            if i not in candidate_positions:
+                                candidate_positions[i] = 0
+                            candidate_positions[i] += 1
+                    else:
+                        i += 1
+            
+            # Add positions that appear in at least 50% of analyzed rows
+            threshold = len(text_lines[:min(20, len(text_lines))]) * 0.5
+            for pos, count in candidate_positions.items():
+                if count >= threshold and pos not in boundaries:
+                    boundaries.append(pos)
+            
+            # Strategy 2: Analyze header line for column name boundaries
+            i = 0
+            while i < len(header_line):
+                if header_line[i] != ' ':
+                    # Find end of current word/column name
+                    word_end = i
+                    while word_end < len(header_line) and header_line[word_end] != ' ':
+                        word_end += 1
+                    # Look ahead for 2+ spaces
+                    j = word_end
+                    while j < len(header_line) and header_line[j] == ' ':
+                        j += 1
+                    if j - word_end >= 2:  # Found 2+ spaces
+                        if j not in boundaries:
+                            boundaries.append(j)
+                        i = j
+                    else:
+                        i = word_end
+                else:
+                    i += 1
+            
+            # Sort and remove duplicates
+            boundaries = sorted(set(boundaries))
+            
+            # Add end position
+            max_len = max(len(line) for line in text_lines if line.strip())
+            if not boundaries or boundaries[-1] < max_len:
+                boundaries.append(max_len)
+            
+            return boundaries
+        
+        try:
+            boundaries = find_column_boundaries_improved(lines)
+            
+            if len(boundaries) < 2:
+                # Final fallback: regex split
+                header = re.split(r'\s{2,}', header_line.strip())
+                header = [col.strip() for col in header if col.strip()]
+            else:
+                # Extract column names using boundaries
+                header = []
+                for i in range(len(boundaries) - 1):
+                    start = boundaries[i]
+                    end = boundaries[i + 1] if i + 1 < len(boundaries) else len(header_line)
+                    col_name = header_line[start:end].strip()
+                    if col_name:
+                        header.append(col_name)
+            
+            if not header:
+                return pd.DataFrame()
+            
+            # Parse data rows
+            data_rows = []
+            for line in lines[1:]:
+                if not line.strip():
+                    continue
+                
+                row = []
+                for i in range(len(boundaries) - 1):
+                    start = boundaries[i]
+                    end = boundaries[i + 1] if i + 1 < len(boundaries) else len(line)
+                    cell = line[start:end].strip() if start < len(line) else ''
+                    
+                    if not cell or cell.upper() == 'NULL':
+                        row.append(None)
+                    else:
+                        row.append(cell)
+                
+                while len(row) < len(header):
+                    row.append(None)
+                row = row[:len(header)]
+                
+                if len(row) == len(header):
+                    data_rows.append(row)
+            
+            df = pd.DataFrame(data_rows, columns=header)
+            
+            # Clean up
+            if not df.empty:
+                df.columns = df.columns.str.strip()
+                df = df.replace('NULL', None)
+                df = df.replace('', None)
+                
+                for col in df.columns:
+                    if df[col].isna().all():
+                        continue
+                    try:
+                        numeric_series = pd.to_numeric(df[col], errors='coerce')
+                        if numeric_series.notna().sum() > len(df) * 0.5:
+                            df[col] = numeric_series
+                    except Exception:
+                        pass
+            
+            return df
+            
+        except Exception:
+            # Ultimate fallback: simple regex split
+            header = re.split(r'\s{2,}', header_line.strip())
+            header = [col.strip() for col in header if col.strip()]
+            
+            if not header:
+                return pd.DataFrame()
+            
+            data_rows = []
+            for line in lines[1:]:
+                if not line.strip():
+                    continue
+                row = re.split(r'\s{2,}', line.strip())
+                row = [cell.strip() if cell.strip() and cell.strip().upper() != 'NULL' else None for cell in row]
+                while len(row) < len(header):
+                    row.append(None)
+                row = row[:len(header)]
+                if len(row) == len(header):
+                    data_rows.append(row)
+            
+            return pd.DataFrame(data_rows, columns=header)
         
     except Exception as e:
         # Fallback to regex-based parsing if boundary detection fails

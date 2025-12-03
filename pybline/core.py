@@ -209,7 +209,7 @@ def run_sql(sql_query, queue_name=None, io=True, timeout=0, log_enabled=True, wa
     return query_output, rows
 
 
-def run_pgsql(sql_query, io=True, timeout=0, log_enabled=True, warn=True, alert=True):
+def run_pgsql(sql_query, io=False, timeout=0, log_enabled=True, warn=True, alert=True):
     """
     Run a PostgreSQL query on the local machine.
 
@@ -218,14 +218,16 @@ def run_pgsql(sql_query, io=True, timeout=0, log_enabled=True, warn=True, alert=
 
     Args:
         sql_query (str): SQL query to execute.
-        io (bool): If True, prints the formatted output and row count.
+        io (bool): If True, prints the formatted output and row count. Default is False.
         timeout (int): Optional timeout in seconds for the query (0 = no timeout).
         log_enabled (bool): If True, appends query and output to ~/pb_logs (same as run_sql).
         warn (bool): If True, shows a confirmation dialog for dangerous SQL operations.
         alert (bool): If True, plays a sound on completion or error.
 
     Returns:
-        (output, rows): A tuple of formatted output string and a row-count string.
+        (df, rows): A tuple of pandas DataFrame (for SELECT queries) or empty DataFrame (for non-SELECT), and a row-count string.
+                     For SELECT queries, returns the DataFrame directly to avoid unreliable text parsing.
+                     For non-SELECT queries, returns an empty DataFrame.
     """
 
     # Check for dangerous SQL operations (same logic as run_sql)
@@ -259,6 +261,7 @@ def run_pgsql(sql_query, io=True, timeout=0, log_enabled=True, warn=True, alert=
     cursor = None
     output_str = ""
     rows_str = ""
+    result_df = pd.DataFrame()  # Will contain DataFrame for SELECT queries, empty for non-SELECT
 
     try:
         # Connect to PostgreSQL
@@ -294,17 +297,22 @@ def run_pgsql(sql_query, io=True, timeout=0, log_enabled=True, warn=True, alert=
                 rows_str = "No rows selected"
                 output_str = ""
             else:
-                # Format DataFrame as a simple text table
+                # Format DataFrame as a simple text table for display/logging
                 output_str = df.to_string(index=False)
                 if row_count == 1:
                     rows_str = "1 row selected"
                 else:
                     rows_str = f"{row_count} rows selected"
+            
+            # Return DataFrame directly instead of text output
+            # This avoids unreliable text parsing
+            result_df = df
         else:
             # Non-SELECT statements (INSERT/UPDATE/DELETE, DDL)
             conn.commit()
             affected = cursor.rowcount
             output_str = ""
+            result_df = pd.DataFrame()  # Empty DataFrame for non-SELECT queries
             if affected == -1:
                 rows_str = "Query executed successfully"
             elif affected == 1:
@@ -348,7 +356,9 @@ def run_pgsql(sql_query, io=True, timeout=0, log_enabled=True, warn=True, alert=
             if rows_str:
                 print(rows_str)
 
-        return output_str, rows_str
+        # Return DataFrame directly instead of text output
+        # This avoids unreliable text parsing issues
+        return result_df, rows_str
 
     except Exception as e:
         if conn is not None:
@@ -389,7 +399,7 @@ def run_pgsql(sql_query, io=True, timeout=0, log_enabled=True, warn=True, alert=
             except Exception:
                 pass
 
-        return "", ""
+        return pd.DataFrame(), ""
 
     finally:
         if cursor is not None:
