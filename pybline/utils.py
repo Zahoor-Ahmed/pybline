@@ -156,7 +156,7 @@ def _trim_zwsp_and_whitespace(text):
 def pgsql_to_df(output):
     """
     Convert text output from run_pgsql() into a Pandas DataFrame.
-    Parses the space-separated table format from pandas DataFrame.to_string().
+    Parses the fixed-width table format from pandas DataFrame.to_string().
 
     Args:
         output (str): Raw output string from run_pgsql() query execution.
@@ -171,68 +171,161 @@ def pgsql_to_df(output):
     if len(lines) < 1:
         return pd.DataFrame()
     
-    # First line is the header
-    header_line = lines[0].strip()
-    if not header_line:
+    header_line = lines[0]
+    if not header_line.strip():
         return pd.DataFrame()
     
-    # Parse header - split by multiple spaces (2+ spaces indicate column boundaries)
-    # Use regex to split on 2+ spaces
-    header = re.split(r'\s{2,}', header_line)
-    header = [col.strip() for col in header if col.strip()]
+    # Detect column boundaries by analyzing the header and data rows
+    # Find positions where columns start by looking for 2+ consecutive spaces
+    def find_column_boundaries(text_lines):
+        """Find column start positions by analyzing spacing patterns."""
+        if not text_lines:
+            return []
+        
+        # Find all positions with 2+ spaces across all lines
+        space_positions = set()
+        for line in text_lines:
+            i = 0
+            while i < len(line):
+                if line[i] == ' ':
+                    # Count consecutive spaces
+                    space_start = i
+                    while i < len(line) and line[i] == ' ':
+                        i += 1
+                    space_count = i - space_start
+                    # If 2+ spaces, mark the position after the spaces as a potential column start
+                    if space_count >= 2 and i < len(line):
+                        space_positions.add(i)
+                else:
+                    i += 1
+        
+        # Also check for transitions: non-space to space (end of column) and space to non-space (start)
+        boundaries = [0]  # First column always starts at 0
+        
+        # Analyze the header line more carefully
+        # Find where column names end (non-space followed by 2+ spaces)
+        i = 0
+        while i < len(header_line):
+            if header_line[i] != ' ':
+                # Look ahead for 2+ spaces
+                j = i + 1
+                while j < len(header_line) and header_line[j] == ' ':
+                    j += 1
+                if j - i - 1 >= 2:  # Found 2+ spaces after this column
+                    # The next column starts at j
+                    if j not in boundaries:
+                        boundaries.append(j)
+                    i = j
+                else:
+                    i += 1
+            else:
+                i += 1
+        
+        # Sort and remove duplicates
+        boundaries = sorted(set(boundaries))
+        
+        # Add end position
+        max_len = max(len(line) for line in text_lines if line.strip())
+        if boundaries[-1] < max_len:
+            boundaries.append(max_len)
+        
+        return boundaries
     
-    if not header:
-        return pd.DataFrame()
-    
-    # Parse data rows
-    data_rows = []
-    for line in lines[1:]:
-        line = line.strip()
-        if not line:
-            continue
+    try:
+        # Find column boundaries
+        boundaries = find_column_boundaries(lines[:min(20, len(lines))])  # Analyze first 20 rows
         
-        # Split by multiple spaces (2+ spaces) to match column boundaries
-        row = re.split(r'\s{2,}', line)
-        row = [cell.strip() if cell.strip() else None for cell in row]
+        if len(boundaries) < 2:
+            # Fallback: use regex split
+            header = re.split(r'\s{2,}', header_line.strip())
+            header = [col.strip() for col in header if col.strip()]
+        else:
+            # Extract column names using boundaries
+            header = []
+            for i in range(len(boundaries) - 1):
+                start = boundaries[i]
+                end = boundaries[i + 1] if i + 1 < len(boundaries) else len(header_line)
+                col_name = header_line[start:end].strip()
+                if col_name:
+                    header.append(col_name)
         
-        # Pad or truncate to match header length
-        if len(row) < len(header):
-            row += [None] * (len(header) - len(row))
-        elif len(row) > len(header):
-            row = row[:len(header)]
+        if not header:
+            return pd.DataFrame()
         
-        if len(row) == len(header):
-            data_rows.append(row)
-    
-    # Create DataFrame
-    df = pd.DataFrame(data_rows, columns=header)
-    
-    # Clean up the DataFrame
-    if not df.empty:
-        # Trim column names
-        df.columns = df.columns.str.strip()
-        
-        # Convert 'NULL' strings to None
-        df = df.replace('NULL', None)
-        df = df.replace('', None)
-        
-        # Try to infer numeric types
-        for col in df.columns:
-            # Skip if all values are None
-            if df[col].isna().all():
+        # Parse data rows using the boundaries
+        data_rows = []
+        for line in lines[1:]:
+            if not line.strip():
                 continue
             
-            # Try to convert to numeric
-            try:
-                # Replace None with NaN for conversion
-                numeric_series = pd.to_numeric(df[col], errors='coerce')
-                # If conversion was successful for most values, use it
-                if numeric_series.notna().sum() > len(df) * 0.5:
-                    df[col] = numeric_series
-            except Exception:
-                pass
-    
-    return df
+            row = []
+            for i in range(len(boundaries) - 1):
+                start = boundaries[i]
+                end = boundaries[i + 1] if i + 1 < len(boundaries) else len(line)
+                cell = line[start:end].strip() if start < len(line) else ''
+                
+                # Convert empty strings and 'NULL' to None
+                if not cell or cell.upper() == 'NULL':
+                    row.append(None)
+                else:
+                    row.append(cell)
+            
+            # Ensure row has same length as header
+            while len(row) < len(header):
+                row.append(None)
+            row = row[:len(header)]
+            
+            if len(row) == len(header):
+                data_rows.append(row)
+        
+        # Create DataFrame
+        df = pd.DataFrame(data_rows, columns=header)
+        
+        # Clean up the DataFrame
+        if not df.empty:
+            # Trim column names
+            df.columns = df.columns.str.strip()
+            
+            # Convert 'NULL' strings to None
+            df = df.replace('NULL', None)
+            df = df.replace('', None)
+            
+            # Try to infer numeric types
+            for col in df.columns:
+                if df[col].isna().all():
+                    continue
+                try:
+                    numeric_series = pd.to_numeric(df[col], errors='coerce')
+                    if numeric_series.notna().sum() > len(df) * 0.5:
+                        df[col] = numeric_series
+                except Exception:
+                    pass
+        
+        return df
+        
+    except Exception as e:
+        # Fallback to regex-based parsing if boundary detection fails
+        header = re.split(r'\s{2,}', header_line.strip())
+        header = [col.strip() for col in header if col.strip()]
+        
+        if not header:
+            return pd.DataFrame()
+        
+        # Parse rows using the same split pattern
+        data_rows = []
+        for line in lines[1:]:
+            if not line.strip():
+                continue
+            row = re.split(r'\s{2,}', line.strip())
+            row = [cell.strip() if cell.strip() and cell.strip().upper() != 'NULL' else None for cell in row]
+            # Pad or truncate to match header length
+            while len(row) < len(header):
+                row.append(None)
+            row = row[:len(header)]
+            if len(row) == len(header):
+                data_rows.append(row)
+        
+        return pd.DataFrame(data_rows, columns=header)
 
 
 def text_to_df(output):
